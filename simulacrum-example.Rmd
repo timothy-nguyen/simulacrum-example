@@ -1,0 +1,74 @@
+---
+title: "Simulacrum"
+author: "Timothy Nguyen"
+date: "2025-02-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r, results = 'hide'}
+library(dplyr)
+library(knitr)
+
+```
+
+# Data ingestion
+
+```{r}
+ZIP_FILEPATH <- "C:/Users/60266886/Downloads/simulacrum_v2.1.0.zip"
+zip_tables <- unzip(ZIP_FILEPATH, list = TRUE)
+
+patient <- read.csv(unz(ZIP_FILEPATH, "simulacrum_v2.1.0/Data/sim_av_patient.csv"))
+tumours <- read.csv(unz(ZIP_FILEPATH, "simulacrum_v2.1.0/Data/sim_av_tumour.csv"))
+
+```
+
+# Missingness checks
+
+* Missing values are empty string for character data type, else `NA` for numeric
+
+```{r}
+check_missing_var <- function(x) {
+  if (is.character(x)) return(sum(x == ''))
+  else return(sum(is.na(x)))
+}
+
+check_missing_tbl <- function(.data) {
+  # Return summary table with count and percent of missing values
+  missing <- lapply(
+    .data,
+    check_missing_var
+  )
+  
+  missing_tbl <- data.frame(
+    variable = names(missing),
+    type = unname(sapply(.data, typeof)),
+    n_missing = as.numeric(missing),
+    pct_missing = as.numeric(missing) / nrow(.data)
+  )
+  
+  return(missing_tbl)
+}
+
+format_missing_tbl <- function(.data) {
+  # Same output as `check_missing_tbl` but formatted slightly for presentation
+  return(
+    check_missing_tbl(.data) |>
+      arrange(desc(n_missing)) |>
+      mutate(n_missing = scales::comma(n_missing),
+             pct_missing = scales::percent(pct_missing, accuracy = .1)) |>
+      rename(`Missing (count)` = n_missing,
+             `Missing (percent)` = pct_missing)
+  )
+}
+missing_patient <- check_missing_tbl(patient)
+missing_tumours <- check_missing_tbl(tumours)
+
+kable(format_missing_tbl(patient))
+kable(format_missing_tbl(tumours))
+```
+
+
