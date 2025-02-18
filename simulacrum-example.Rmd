@@ -18,17 +18,17 @@ library(knitr)
 # Data ingestion
 
 ```{r}
-ZIP_FILEPATH <- "C:/Users/60266886/Downloads/simulacrum_v2.1.0.zip"
+ZIP_FILEPATH <- "./simulacrum_v2.1.0.zip"
 zip_tables <- unzip(ZIP_FILEPATH, list = TRUE)
 
 patient <- read.csv(unz(ZIP_FILEPATH, "simulacrum_v2.1.0/Data/sim_av_patient.csv"))
-tumours <- read.csv(unz(ZIP_FILEPATH, "simulacrum_v2.1.0/Data/sim_av_tumour.csv"))
+tumour  <- read.csv(unz(ZIP_FILEPATH, "simulacrum_v2.1.0/Data/sim_av_tumour.csv"))
 
 ```
 
 # Missingness checks
 
-* Missing values are empty string for character data type, else `NA` for numeric
+**Note**: Missing values are empty string for character data type, else `NA` for numeric
 
 ```{r}
 check_missing_var <- function(x) {
@@ -66,9 +66,29 @@ format_missing_tbl <- function(.data) {
 }
 missing_patient <- check_missing_tbl(patient)
 missing_tumours <- check_missing_tbl(tumours)
-
-kable(format_missing_tbl(patient))
-kable(format_missing_tbl(tumours))
 ```
 
+_Patient table_
+
+* Death code variables have the highest missingness. This reflects the majority of patients recorded as being alive. For patients that died, most records have the underlying cause of death (2.1% missing) and location of death recorded (1.8% missing).
+
+* Ethnicity is missing in 4.8% of patient records followed by date in which vital status is recorded (0.1%).
+
+* There is no missingness for patient ID, patient gender, vital status, and link number (proxy for NHS number).
+
+```{r}
+kable(format_missing_tbl(patient))
+
+# Additional analysis: missingness for patients who have died
+kable(format_missing_tbl(patient |> filter(grepl("^D", VITALSTATUS))),
+      caption = "Filtered for patients who have died")
+```
+
+_Tumour table_
+
+Missingness is high for some variables where data is only recorded if it is relevant to the tumour. For example, the Gleason Tertiary score (`GLEASON_TERTIARY`) has the highest missingness (99.7%) however this is only relevant for prostate cancers. This is similarly the case for progesterone receptor status (`PR_STATUS`, 94% missing) and oestrogen receptor status (`ER_STATUS`, 91.2% missing).
+
+```{r}
+kable(format_missing_tbl(tumour))
+```
 
