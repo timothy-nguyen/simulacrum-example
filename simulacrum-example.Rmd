@@ -129,16 +129,23 @@ stopifnot(sum(is.na(patient_transform$GENDER_LABEL)) == 0)
 
 ## Age and sex distribution
 
-**Note**: Age is recorded at time of diagnosis. The same patient may appear multiple times if they have more than one tumour.
+**Note**: Age is recorded at time of diagnosis. The same patient may appear multiple times if they have more than one tumour. Tumour diagnosis dates from 1 January 2016 to 31 December 2019, inclusive.
 
 Male patients are typically slightly older than female patients at the time of tumour diagnosis (Male median: 71 years; Female median: 68 years). Only 2 patients with indeterminate sex were recorded in the tumour dataset.
 
 ```{r}
 tumour_transform <- tumour |>
-  mutate(GENDER_LABEL = map_gender_label(GENDER))
+  mutate(GENDER_LABEL = map_gender_label(GENDER),
+         DIAGNOSISDATEBEST = as.Date(DIAGNOSISDATEBEST))
 
 table(tumour_transform$GENDER_LABEL)
 tapply(tumour_transform$AGE, tumour_transform$GENDER_LABEL, summary)
+```
+
+```{r}
+# check date range of analysis
+MIN_DATE <- min(tumour_transform$DIAGNOSISDATEBEST, na.rm = TRUE)
+MAX_DATE <- max(tumour_transform$DIAGNOSISDATEBEST, na.rm = TRUE)
 ```
 
 ```{r}
@@ -155,6 +162,10 @@ ggplot(data = tumour_transform |> filter(GENDER_LABEL != "Indeterminate"),
 
 ## Comorbidities
 
+* Most tumour diagnosed patients (78.3%) do not have any recorded chronic condition (i.e. total Charlson comorbidity score of zero).
+
+* The most common comorbidities contributing to the Charlson score were pulmonary disease, diabetes, and renal disease.
+
 ```{r}
 charlson_total <- tumour_transform |>
   count(CHRL_TOT_27_03) |>
@@ -170,7 +181,8 @@ ggplot(data = charlson_total, aes(x = CHRL_TOT_27_03, y = pct,
   scale_x_continuous(breaks = min(charlson_total$CHRL_TOT_27_03, na.rm = TRUE):
                        max(charlson_total$CHRL_TOT_27_03, na.rm = TRUE)) +
   labs(x = "Total Charlson comorbidity score", y = "Percent",
-       title = "Distribution of Charlson comorbidity score for tumour diagnosed patients")
+       title = "Distribution of total Charlson comorbidity score",
+       subtitle = "Tumour diagnosed patients from 1 Jan 2016 to 31 Dec 2019")
 ```
 
 ```{r}
@@ -206,3 +218,75 @@ charlson_long <- charlson_breakdown |>
 
 ```
 
+```{r}
+charlson_flag_summary <- charlson_long |>
+  count(Description) |>
+  arrange(desc(n))
+
+ggplot(data = charlson_flag_summary, aes(x = reorder(Description, n), y = n,
+                                         label = paste0(round(n / 1e3), "k"))) +
+  geom_col() +
+  geom_text(hjust = 1) +
+  coord_flip() +
+  scale_y_continuous(labels = scales::comma) +
+  labs(x = '', y = 'Count', title = 'Count of Charlson comorbidity flags',
+       subtitle = "Tumour diagnosed patients from 1 Jan 2016 to 31 Dec 2019")
+```
+
+## Ethnicity for lowest income
+
+```{r}
+# Get ethnic groups for lowest quintile income level group
+ethnicity_map <- readxl::read_xlsx("Documents/all_z_lookup_tables.xlsx",
+                                     sheet = "z_ethnicity") |>
+  select(Code, Description)
+
+# seems like patient's quintiles may change at time of tumour diagnosis
+check_unique_income <- tumour_transform |>
+  distinct(PATIENTID, QUINTILE_2019) |>
+  count(PATIENTID) |>
+  filter(n > 1)
+  
+tumour_patient <- tumour_transform |>
+  left_join(patient_transform |> select(PATIENTID, ETHNICITY), by = "PATIENTID") |>
+  left_join(ethnicity_map, by = c("ETHNICITY" = "Code"))
+stopifnot(nrow(tumour_patient) == nrow(tumour_transform)) # expect 1-to-1
+
+# let's free some memory
+rm(tumour)
+gc()
+```
+
+```{r}
+# (a) Percent of ethnic groups for most deprived income group
+ethnicity_count <- tumour_patient |>
+  filter(QUINTILE_2019 == "1 - most deprived") |>
+  count(Description) |>
+  mutate(Percent = scales::percent(n / sum(n), accuracy = .1)) |>
+  arrange(desc(n))
+
+ethnicity_count |>
+  select(Ethnicity = Description,
+         Count = n, 
+         Percent) |>
+  kable()
+```
+
+* 
+```{r}
+# (b) Which ethnic groups have higher % of low income earners
+ethnicity_income <- tumour_patient |>
+  count(QUINTILE_2019, Description) |>
+  group_by(Description) |>
+  mutate(Percent = n / sum(n),
+         Percent_label = scales::percent(Percent, accuracy = .1))|>
+  ungroup() |>
+  filter(QUINTILE_2019 == "1 - most deprived") |>
+  arrange(desc(Percent))
+
+ethnicity_income |>
+  select(Ethnicity = Description,
+         Count = n, 
+         Percent = Percent_label) |>
+  kable()
+```
