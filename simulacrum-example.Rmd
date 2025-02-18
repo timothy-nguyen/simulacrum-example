@@ -10,8 +10,12 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 ```
 
 ```{r, results = 'hide'}
+# consider using renv for library management
 library(dplyr)
+library(dtplyr) # data.table wrapper for dplyr for faster execution
 library(knitr)
+library(ggplot2)
+library(tidyr)
 
 ```
 
@@ -65,7 +69,7 @@ format_missing_tbl <- function(.data) {
   )
 }
 missing_patient <- check_missing_tbl(patient)
-missing_tumours <- check_missing_tbl(tumours)
+missing_tumour  <- check_missing_tbl(tumour)
 ```
 
 _Patient table_
@@ -90,5 +94,115 @@ Missingness is high for some variables where data is only recorded if it is rele
 
 ```{r}
 kable(format_missing_tbl(tumour))
+```
+
+# Feature engineering
+
+```{r}
+map_gender_label <- function(x) {
+  case_when(
+    {{ x }} == "1" ~ "Male",
+    {{ x }} == "2" ~ "Female",
+    {{ x }} == "9" ~ "Indeterminate",
+    TRUE ~ NA_character_
+    )
+}
+
+patient_transform <- patient |>
+  dtplyr::lazy_dt() |>
+  mutate(VITALSTATUSDATE = as.Date(VITALSTATUSDATE),
+         VITALSTATUSYEAR = lubridate::year(VITALSTATUSDATE),
+         # map to labels for downstream analysis
+         # see all_z_lookup_tables.xlsx
+         GENDER_LABEL = map_gender_label(GENDER)) |>
+  as_tibble()
+
+patient_transform |>
+  select(VITALSTATUSDATE, VITALSTATUSYEAR) |>
+  head()
+
+# expect no missingness in gender
+stopifnot(sum(is.na(patient_transform$GENDER_LABEL)) == 0)
+```
+
+# Analysis
+
+## Age and sex distribution
+
+**Note**: Age is recorded at time of diagnosis. The same patient may appear multiple times if they have more than one tumour.
+
+Male patients are typically slightly older than female patients at the time of tumour diagnosis (Male median: 71 years; Female median: 68 years). Only 2 patients with indeterminate sex were recorded in the tumour dataset.
+
+```{r}
+tumour_transform <- tumour |>
+  mutate(GENDER_LABEL = map_gender_label(GENDER))
+
+table(tumour_transform$GENDER_LABEL)
+tapply(tumour_transform$AGE, tumour_transform$GENDER_LABEL, summary)
+```
+
+```{r}
+# Exclude indeterminate sex because small cell sizes (n = 2)
+ggplot(data = tumour_transform |> filter(GENDER_LABEL != "Indeterminate"),
+       aes(x = AGE)) +
+  geom_histogram(binwidth = 5) +
+  facet_grid(. ~ GENDER_LABEL) +
+  scale_y_continuous(labels = scales::comma) +
+  labs(title = "Distribution of patient and sex",
+       subtitle = "Age as of tumour diagnosis date",
+       x = "Age", y = "Count")
+```
+
+## Comorbidities
+
+```{r}
+charlson_total <- tumour_transform |>
+  count(CHRL_TOT_27_03) |>
+  mutate(pct = n / sum(n),
+         # omit percent labels for small values
+         pct_label = if_else(pct < 0.001, NA_real_, pct)) 
+
+ggplot(data = charlson_total, aes(x = CHRL_TOT_27_03, y = pct,
+                                  label = scales::percent(pct_label, accuracy = .1))) +
+  geom_col() +
+  geom_text(vjust = -0.5) +
+  scale_y_continuous(labels = scales::percent) +
+  scale_x_continuous(breaks = min(charlson_total$CHRL_TOT_27_03, na.rm = TRUE):
+                       max(charlson_total$CHRL_TOT_27_03, na.rm = TRUE)) +
+  labs(x = "Total Charlson comorbidity score", y = "Percent",
+       title = "Distribution of Charlson comorbidity score for tumour diagnosed patients")
+```
+
+```{r}
+# Separate comma separated comorbidity flags and obtain underlying comorbidities
+# contributing to total Charlson comorbidity score
+
+# determine how many columns to separate into
+max_flags <- tumour_transform |>
+  select(COMORBIDITIES_27_03) |>
+  mutate(len = stringr::str_count(COMORBIDITIES_27_03, ",")) |>
+  summarise(max_len = max(len)) |>
+  pull()
+
+wide_cols <- paste0("comorbidity_", 1:(max_flags + 1))
+charlson_breakdown <- tumour_transform |>
+  select(COMORBIDITIES_27_03) |>
+  tidyr::separate_wider_delim(
+    cols = COMORBIDITIES_27_03,
+    delim = ",",
+    names = wide_cols,
+    too_few = "align_start"
+  )
+
+comorbidity_map <- readxl::read_xlsx("Documents/all_z_lookup_tables.xlsx",
+                                     sheet = "z_comorbidities") |>
+  select(Code, Description)
+
+charlson_long <- charlson_breakdown |>
+  tidyr::pivot_longer(cols = all_of(wide_cols), values_drop_na = TRUE) |>
+  filter(value != "") |>
+  mutate(value = as.double(value)) |>
+  left_join(comorbidity_map, by = c("value" = "Code"))
+
 ```
 
