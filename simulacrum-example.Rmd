@@ -2,7 +2,12 @@
 title: "Simulacrum"
 author: "Timothy Nguyen"
 date: "2025-02-17"
-output: html_document
+output:
+  html_document:
+      toc: true
+      toc_depth: 2
+      toc_float: true
+      number_sections: true
 ---
 
 ```{r setup, include=FALSE}
@@ -32,7 +37,7 @@ tumour  <- read.csv(unz(ZIP_FILEPATH, "simulacrum_v2.1.0/Data/sim_av_tumour.csv"
 
 # Missingness checks
 
-**Note**: Missing values are empty string for character data type, else `NA` for numeric
+**Note**: Missing values are empty string for character data type, else `NA` for numeric.
 
 ```{r}
 check_missing_var <- function(x) {
@@ -146,6 +151,7 @@ tapply(tumour_transform$AGE, tumour_transform$GENDER_LABEL, summary)
 # check date range of analysis
 MIN_DATE <- min(tumour_transform$DIAGNOSISDATEBEST, na.rm = TRUE)
 MAX_DATE <- max(tumour_transform$DIAGNOSISDATEBEST, na.rm = TRUE)
+c(MIN_DATE, MAX_DATE)
 ```
 
 ```{r}
@@ -215,7 +221,6 @@ charlson_long <- charlson_breakdown |>
   filter(value != "") |>
   mutate(value = as.double(value)) |>
   left_join(comorbidity_map, by = c("value" = "Code"))
-
 ```
 
 ```{r}
@@ -226,16 +231,18 @@ charlson_flag_summary <- charlson_long |>
 ggplot(data = charlson_flag_summary, aes(x = reorder(Description, n), y = n,
                                          label = paste0(round(n / 1e3), "k"))) +
   geom_col() +
-  geom_text(hjust = 1) +
+  geom_text(hjust = 1, color = 'white') +
   coord_flip() +
   scale_y_continuous(labels = scales::comma) +
   labs(x = '', y = 'Count', title = 'Count of Charlson comorbidity flags',
        subtitle = "Tumour diagnosed patients from 1 Jan 2016 to 31 Dec 2019")
 ```
 
-## Ethnicity for lowest income
+## Ethnicity with lowest income
 
-```{r}
+**Note**: The same patient may have different income quintiles recorded if they are diagnosed with a tumour more than once. Results have not filtered out missing (e.g. NA) or unknown (e.g. Not stated, Not known) ethnicity values.
+
+```{r, results = 'hide'}
 # Get ethnic groups for lowest quintile income level group
 ethnicity_map <- readxl::read_xlsx("Documents/all_z_lookup_tables.xlsx",
                                      sheet = "z_ethnicity") |>
@@ -252,7 +259,6 @@ tumour_patient <- tumour_transform |>
   left_join(ethnicity_map, by = c("ETHNICITY" = "Code"))
 stopifnot(nrow(tumour_patient) == nrow(tumour_transform)) # expect 1-to-1
 
-# let's free some memory
 rm(tumour)
 gc()
 ```
@@ -272,7 +278,8 @@ ethnicity_count |>
   kable()
 ```
 
-* 
+The top three ethnic groups with the highest proportion of low income earners, at time of tumour diagnosis, are: Asian Pakistani (21.5%), Asian Bangladeshi (21.3%), and White and Black African (20.7%).
+
 ```{r}
 # (b) Which ethnic groups have higher % of low income earners
 ethnicity_income <- tumour_patient |>
